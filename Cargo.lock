@@ -1278,6 +1278,7 @@ dependencies = [
  "diesel-async",
  "dotenvy",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

@@ -3,8 +3,8 @@ CREATE TABLE users (
     username varchar(100) not null,
     name varchar(250) not null,
     mail varchar(250) not null,
-    created_at timestamp default current_timestamp not null,
-    modified_at timestamp default current_timestamp not null,
+    created_at timestamptz default current_timestamp not null,
+    modified_at timestamptz default current_timestamp not null,
     UNIQUE(username),
     UNIQUE(mail)
 );

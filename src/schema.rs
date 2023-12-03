@@ -1,3 +1,5 @@
+// @generated automatically by Diesel CLI.
+
 diesel::table! {
     users (id) {
         id -> Uuid,
@@ -7,7 +9,7 @@ diesel::table! {
         name -> Varchar,
         #[max_length = 250]
         mail -> Varchar,
-        created_at -> Timestamp,
-        modified_at -> Timestamp,
+        created_at -> Timestamptz,
+        modified_at -> Timestamptz,
     }
 }
