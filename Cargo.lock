@@ -1807,7 +1807,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "translate-me"
+name = "translate-me-api"
 version = "0.1.0"
 dependencies = [
  "axum",

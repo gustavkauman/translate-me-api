@@ -1,5 +1,5 @@
 [package]
-name = "translate-me"
+name = "translate-me-api"
 version = "0.1.0"
 edition = "2021"
 
