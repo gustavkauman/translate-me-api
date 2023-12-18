@@ -1,5 +1,7 @@
 use crate::api::{ApiError, ApiState};
 use crate::schema::users::{self, dsl::*};
+use axum::routing::{delete, get, patch, post};
+use axum::Router;
 use axum::{
     extract::{Path, State},
     Json,
@@ -11,9 +13,7 @@ use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(
-    Queryable, Selectable, Identifiable, Debug, Clone, Serialize, PartialEq,
-)]
+#[derive(Queryable, Selectable, Debug, Clone, Serialize, PartialEq)]
 #[diesel(table_name = crate::schema::users)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {
@@ -27,7 +27,7 @@ pub struct User {
 
 #[derive(Deserialize, Insertable)]
 #[diesel(table_name = crate::schema::users)]
-pub struct CreateUserPayload {
+struct CreateUserPayload {
     username: String,
     name: String,
     mail: String,
@@ -35,17 +35,26 @@ pub struct CreateUserPayload {
 
 #[derive(Deserialize, AsChangeset)]
 #[diesel(table_name = crate::schema::users)]
-pub struct UpdateUserPayload {
+struct UpdateUserPayload {
     username: Option<String>,
     name: Option<String>,
     mail: Option<String>,
 }
 
-pub async fn get_user(
+pub fn create_user_api_router() -> Router<ApiState> {
+    Router::new()
+        .route("/users", get(get_users))
+        .route("/users", post(create_user))
+        .route("/users/:user_id", get(get_user))
+        .route("/users/:user_id", patch(update_user))
+        .route("/users/:user_id", delete(delete_user))
+}
+
+async fn get_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await.unwrap();
+    let mut conn = state.db_conn_pool.get().await?;
 
     let user = users
         .filter(id.eq(user_id))
@@ -60,10 +69,10 @@ pub async fn get_user(
     Ok(Json(user))
 }
 
-pub async fn get_users(
+async fn get_users(
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<User>>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await.unwrap();
+    let mut conn = state.db_conn_pool.get().await?;
 
     let results: Vec<User> = users
         .select(User::as_select())
@@ -74,11 +83,11 @@ pub async fn get_users(
     Ok(Json(results))
 }
 
-pub async fn create_user(
+async fn create_user(
     State(state): State<ApiState>,
     Json(payload): Json<CreateUserPayload>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await.unwrap();
+    let mut conn = state.db_conn_pool.get().await?;
 
     // TODO: Add checks for constraint violations
     let new_user = diesel::insert_into(users::table)
@@ -91,12 +100,12 @@ pub async fn create_user(
     Ok(Json(new_user))
 }
 
-pub async fn update_user(
+async fn update_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await.unwrap();
+    let mut conn = state.db_conn_pool.get().await?;
 
     let updated_user = diesel::update(users::table)
         .filter(id.eq(user_id))
@@ -115,11 +124,11 @@ pub async fn update_user(
     Ok(Json(updated_user))
 }
 
-pub async fn delete_user(
+async fn delete_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<(), ApiError> {
-    let mut conn = state.db_conn_pool.get().await.unwrap();
+    let mut conn = state.db_conn_pool.get().await?;
 
     let _ = diesel::delete(users::table)
         .filter(id.eq(user_id))

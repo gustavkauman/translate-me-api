@@ -1,8 +1,5 @@
-use crate::api::{user::*, ApiState};
-use axum::{
-    routing::{delete, get, patch},
-    Router,
-};
+use crate::api::{user::*, workspace::create_workspace_api_router, ApiState};
+use axum::Router;
 use diesel_async::{
     pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
     AsyncPgConnection,
@@ -19,10 +16,8 @@ pub fn create_api_router() -> Router {
     };
 
     let api = Router::new()
-        .route("/users", get(get_users).post(create_user))
-        .route("/users/:user_id", get(get_user))
-        .route("/users/:user_id", patch(update_user))
-        .route("/users/:user_id", delete(delete_user))
+        .merge(create_user_api_router())
+        .merge(create_workspace_api_router())
         .with_state(app_state);
 
     api
