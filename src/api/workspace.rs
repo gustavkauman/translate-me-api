@@ -1,18 +1,12 @@
 use crate::api::{ApiError, ApiState};
-use crate::schema::workspaces::{self, dsl::*};
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use diesel::prelude::*;
-use diesel::result::Error as DieselError;
-use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Queryable, Selectable, Debug, Clone, Serialize, PartialEq)]
-#[diesel(table_name = crate::schema::workspaces)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Debug, Clone, Serialize, PartialEq, sqlx::FromRow)]
 pub struct Workspace {
     id: Uuid,
     name: String,
@@ -21,8 +15,7 @@ pub struct Workspace {
     modified_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize, Insertable)]
-#[diesel(table_name = crate::schema::workspaces)]
+#[derive(Deserialize)]
 struct CreateWorkspacePayload {
     name: String,
     created_by: Uuid, // TODO: This should be obtained from token instead
@@ -38,13 +31,16 @@ pub fn create_workspace_api_router() -> Router<ApiState> {
 async fn get_all_workspaces(
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<Workspace>>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let workspaces_array = workspaces
-        .select(Workspace::as_select())
-        .load(&mut conn)
-        .await
-        .map_err(|_| ApiError::InternalServerError)?;
+    let workspaces_array = sqlx::query_as!(
+        Workspace,
+        // language=PostgreSQL
+        r#"
+            select * from workspaces
+        "#
+    )
+    .fetch_all(&state.db_conn_pool)
+    .await
+    .map_err(|_| ApiError::InternalServerError)?;
 
     Ok(Json(workspaces_array))
 }
@@ -53,17 +49,20 @@ async fn get_workspace(
     State(state): State<ApiState>,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Workspace>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let workspace = workspaces
-        .filter(id.eq(workspace_id))
-        .select(Workspace::as_select())
-        .first(&mut conn)
-        .await
-        .map_err(|db_error| match db_error {
-            DieselError::NotFound => ApiError::NotFound(workspace_id),
-            _ => ApiError::InternalServerError,
-        })?;
+    let workspace = sqlx::query_as!(
+        Workspace,
+        // language=PostgreSQL
+        r#"
+            select * from workspaces where id = $1
+        "#,
+        workspace_id
+    )
+    .fetch_one(&state.db_conn_pool)
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::RowNotFound => ApiError::NotFound(workspace_id),
+        _ => ApiError::InternalServerError,
+    })?;
 
     Ok(Json(workspace))
 }
@@ -72,14 +71,20 @@ async fn create_workspace(
     State(state): State<ApiState>,
     Json(payload): Json<CreateWorkspacePayload>,
 ) -> Result<Json<Workspace>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let new_workspace = diesel::insert_into(workspaces::table)
-        .values(payload)
-        .returning(Workspace::as_returning())
-        .get_result(&mut conn)
-        .await
-        .map_err(|_| ApiError::InternalServerError)?;
+    let new_workspace = sqlx::query_as!(
+        Workspace,
+        // language=PostgreSQL
+        r#"
+            insert into workspaces (name, created_by)
+            values ($1, $2)
+            returning *
+        "#,
+        payload.name,
+        payload.created_by
+    )
+    .fetch_one(&state.db_conn_pool)
+    .await
+    .map_err(|_| ApiError::InternalServerError)?;
 
     Ok(Json(new_workspace))
 }

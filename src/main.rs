@@ -12,7 +12,6 @@ use crate::router::create_api_router;
 
 mod api;
 mod router;
-mod schema;
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +22,7 @@ async fn main() {
         .init();
 
     let app = Router::new()
-        .nest("/api/v1", create_api_router())
+        .nest("/api/v1", create_api_router().await)
         .fallback(handler_404);
 
     let addr = SocketAddr::from_str("127.0.0.1:3000").unwrap();

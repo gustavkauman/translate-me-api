@@ -1,8 +1,5 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
-use diesel_async::{
-    pooled_connection::deadpool::{Pool, PoolError},
-    AsyncPgConnection,
-};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 pub mod user;
@@ -10,7 +7,7 @@ pub mod workspace;
 
 #[derive(Clone)]
 pub struct ApiState {
-    pub db_conn_pool: Pool<AsyncPgConnection>,
+    pub db_conn_pool: PgPool,
 }
 
 #[derive(Debug)]
@@ -45,11 +42,5 @@ impl IntoResponse for ApiError {
             )),
         )
             .into_response()
-    }
-}
-
-impl From<PoolError> for ApiError {
-    fn from(_: PoolError) -> Self {
-        Self::InternalServerError
     }
 }

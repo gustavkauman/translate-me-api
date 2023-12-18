@@ -1,5 +1,4 @@
 use crate::api::{ApiError, ApiState};
-use crate::schema::users::{self, dsl::*};
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use axum::{
@@ -7,15 +6,10 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
-use diesel::result::Error as DieselError;
-use diesel::{prelude::*, Insertable};
-use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Queryable, Selectable, Debug, Clone, Serialize, PartialEq)]
-#[diesel(table_name = crate::schema::users)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Debug, Clone, Serialize, PartialEq, sqlx::FromRow)]
 pub struct User {
     id: Uuid,
     username: String,
@@ -25,16 +19,14 @@ pub struct User {
     modified_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize, Insertable)]
-#[diesel(table_name = crate::schema::users)]
+#[derive(Deserialize)]
 struct CreateUserPayload {
     username: String,
     name: String,
     mail: String,
 }
 
-#[derive(Deserialize, AsChangeset)]
-#[diesel(table_name = crate::schema::users)]
+#[derive(Deserialize)]
 struct UpdateUserPayload {
     username: Option<String>,
     name: Option<String>,
@@ -54,17 +46,12 @@ async fn get_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let user = users
-        .filter(id.eq(user_id))
-        .select(User::as_select())
-        .first(&mut conn)
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db_conn_pool)
         .await
-        .map_err(|db_error| match db_error {
-            DieselError::NotFound => ApiError::NotFound(user_id),
-            _ => ApiError::InternalServerError,
-        })?;
+        // TODO: Properly map error when user does not exist
+        .map_err(|_| ApiError::InternalServerError)?;
 
     Ok(Json(user))
 }
@@ -72,11 +59,8 @@ async fn get_user(
 async fn get_users(
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<User>>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let results: Vec<User> = users
-        .select(User::as_select())
-        .load(&mut conn)
+    let results: Vec<User> = sqlx::query_as::<_, User>("SELECT * FROM users")
+        .fetch_all(&state.db_conn_pool)
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
@@ -87,15 +71,26 @@ async fn create_user(
     State(state): State<ApiState>,
     Json(payload): Json<CreateUserPayload>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    // TODO: Add checks for constraint violations
-    let new_user = diesel::insert_into(users::table)
-        .values(payload)
-        .returning(User::as_returning())
-        .get_result(&mut conn)
-        .await
-        .map_err(|_| ApiError::InternalServerError)?;
+    let new_user = sqlx::query_as!(
+        User,
+        // language=PostgreSQL
+        r#"
+            with inserted_user as (
+                insert into users (username, name, mail)
+                values ($1, $2, $3)
+                returning id, username, name, mail, created_at, modified_at
+            )
+            select * from
+            inserted_user
+        "#,
+        payload.username,
+        payload.name,
+        payload.mail
+    )
+    .fetch_one(&state.db_conn_pool)
+    .await
+    // TODO: Properly map errors with respect to constraints
+    .map_err(|_| ApiError::InternalServerError)?;
 
     Ok(Json(new_user))
 }
@@ -105,21 +100,29 @@ async fn update_user(
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserPayload>,
 ) -> Result<Json<User>, ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
+    let existing_data =
+        sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", user_id)
+            .fetch_one(&state.db_conn_pool)
+            .await
+            .map_err(|err| match err {
+                sqlx::Error::RowNotFound => ApiError::NotFound(user_id),
+                _ => ApiError::InternalServerError,
+            })?;
 
-    let updated_user = diesel::update(users::table)
-        .filter(id.eq(user_id))
-        .set(payload)
-        .returning(User::as_returning())
-        .get_result(&mut conn)
-        .await
-        .map_err(|db_err| match db_err {
-            DieselError::NotFound => ApiError::BadRequest(format!(
-                "User with id {} not found",
-                user_id
-            )),
-            _ => ApiError::InternalServerError,
-        })?;
+    let updated_user = sqlx::query_as!(
+        User,
+        // language=PostgreSQL
+        r#"
+            update users set username = $1, name = $2, mail = $3 WHERE id = $4 RETURNING *
+        "#,
+        payload.username.unwrap_or(existing_data.username),
+        payload.name.unwrap_or(existing_data.name),
+        payload.mail.unwrap_or(existing_data.mail),
+        user_id
+    )
+    .fetch_one(&state.db_conn_pool)
+    .await
+    .map_err(|_| ApiError::InternalServerError)?;
 
     Ok(Json(updated_user))
 }
@@ -128,11 +131,8 @@ async fn delete_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<(), ApiError> {
-    let mut conn = state.db_conn_pool.get().await?;
-
-    let _ = diesel::delete(users::table)
-        .filter(id.eq(user_id))
-        .execute(&mut conn)
+    let _ = sqlx::query!("delete from users where id = $1", user_id)
+        .execute(&state.db_conn_pool)
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
