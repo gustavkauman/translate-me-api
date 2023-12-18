@@ -46,7 +46,7 @@ async fn get_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, ApiError> {
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+    let user = sqlx::query_as::<_, User>("select * from users where id = $1")
         .bind(user_id)
         .fetch_one(&state.db_conn_pool)
         .await
@@ -59,7 +59,7 @@ async fn get_user(
 async fn get_users(
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<User>>, ApiError> {
-    let results: Vec<User> = sqlx::query_as::<_, User>("SELECT * FROM users")
+    let results: Vec<User> = sqlx::query_as::<_, User>("select * from users")
         .fetch_all(&state.db_conn_pool)
         .await
         .map_err(|_| ApiError::InternalServerError)?;
@@ -113,7 +113,7 @@ async fn update_user(
         User,
         // language=PostgreSQL
         r#"
-            update users set username = $1, name = $2, mail = $3 WHERE id = $4 RETURNING *
+            update users set username = $1, name = $2, mail = $3 where id = $4 returning *
         "#,
         payload.username.unwrap_or(existing_data.username),
         payload.name.unwrap_or(existing_data.name),
