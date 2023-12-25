@@ -89,8 +89,15 @@ async fn create_user(
     )
     .fetch_one(&state.db_conn_pool)
     .await
-    // TODO: Properly map errors with respect to constraints
-    .map_err(|_| ApiError::InternalServerError)?;
+    .map_err(|err| match err {
+        sqlx::Error::Database(db_err) => match db_err.constraint() {
+            Some(_) => ApiError::BadRequest(String::from(
+                "Username and/or e-mail is already taken",
+            )),
+            None => ApiError::InternalServerError,
+        },
+        _ => ApiError::InternalServerError,
+    })?;
 
     Ok(Json(new_user))
 }
@@ -131,10 +138,14 @@ async fn delete_user(
     State(state): State<ApiState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<(), ApiError> {
-    let _ = sqlx::query!("delete from users where id = $1", user_id)
+    let res = sqlx::query!("delete from users where id = $1", user_id)
         .execute(&state.db_conn_pool)
         .await
         .map_err(|_| ApiError::InternalServerError)?;
+
+    if res.rows_affected() == 0 {
+        return Err(ApiError::NotFound(user_id));
+    }
 
     Ok(())
 }
